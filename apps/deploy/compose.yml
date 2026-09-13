@@ -1,0 +1,57 @@
+# Coolify Docker Compose application for Chronos + its database.
+#
+# Why a compose app: Coolify duplicates a Docker Compose application per pull
+# request preview, so putting Postgres in this stack gives every preview its own
+# database (container + volume), created and destroyed with the preview.
+#
+# Coolify generates SERVICE_USER_POSTGRES and SERVICE_PASSWORD_64_POSTGRES once
+# per resource and injects them into both services — do not set them yourself.
+#
+# Chronos runs its Drizzle migrations on boot (prepareDb), so a fresh preview
+# database is migrated automatically.
+#
+# Deploy in Coolify: New Resource -> Docker Compose (Git repository), repo
+# filcdev/filc, build pack Docker Compose, compose file apps/deploy/compose.yml.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${SERVICE_USER_POSTGRES}
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_64_POSTGRES}
+      POSTGRES_DB: ${POSTGRES_DB:-filc}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${SERVICE_USER_POSTGRES} -d ${POSTGRES_DB:-filc}
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  chronos:
+    build:
+      context: ../..
+      dockerfile: apps/chronos/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CHRONOS_MODE: production
+      CHRONOS_PORT: "3000"
+      CHRONOS_DATABASE_URL: postgres://${SERVICE_USER_POSTGRES}:${SERVICE_PASSWORD_64_POSTGRES}@postgres:5432/${POSTGRES_DB:-filc}
+      CHRONOS_BASE_URL: ${CHRONOS_BASE_URL}
+      CHRONOS_TRUSTED_ORIGINS: ${CHRONOS_TRUSTED_ORIGINS:-}
+      CHRONOS_ADMIN_EMAIL: ${CHRONOS_ADMIN_EMAIL:?}
+      CHRONOS_AUTH_SECRET: ${CHRONOS_AUTH_SECRET:?}
+      CHRONOS_ENTRA_CLIENT_ID: ${CHRONOS_ENTRA_CLIENT_ID:?}
+      CHRONOS_ENTRA_TENANT_ID: ${CHRONOS_ENTRA_TENANT_ID:?}
+      CHRONOS_ENTRA_CLIENT_SECRET: ${CHRONOS_ENTRA_CLIENT_SECRET:?}
+    ports:
+      - "3000"
+
+volumes:
+  postgres-data:
